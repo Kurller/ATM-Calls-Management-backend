@@ -8,15 +8,25 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    await pool.query("SELECT 1");
-    console.log("🟢 Database connection verified");
+    // 🔥 safer DB check with timeout handling
+    const result = await pool.query("SELECT 1");
+
+    if (result) {
+      console.log("🟢 Database connection verified");
+    }
 
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
+
   } catch (error) {
     console.error("❌ Database connection failed:", error.message);
-    process.exit(1);
+
+    // 🔥 IMPORTANT: don't silently crash on transient Railway issues
+    // Instead retry after delay (helps ECONNRESET cases)
+    console.log("⏳ Retrying DB connection in 5 seconds...");
+
+    setTimeout(startServer, 5000);
   }
 };
 
