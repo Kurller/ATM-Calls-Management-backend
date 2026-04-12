@@ -28,17 +28,20 @@ import { errorHandler } from "./middleware/errorHandler.js";
 const PgSession = pgSession(session);
 const app = express();
 
+/* =========================
+   🔥 CRITICAL FIX FOR RENDER
+========================= */
+app.set("trust proxy", 1);
 
-// =========================
-// PATH FIX
-// =========================
+/* =========================
+   PATH FIX
+========================= */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-
-// =========================
-// SWAGGER CONFIG (FIXED)
-// =========================
+/* =========================
+   SWAGGER CONFIG
+========================= */
 const swaggerOptions = {
   definition: {
     openapi: "3.0.0",
@@ -58,27 +61,26 @@ const swaggerOptions = {
 
 const swaggerSpec = swaggerJsdoc(swaggerOptions);
 
-
-// =========================
-// CORS (PRODUCTION SAFE FIX)
-// =========================
+/* =========================
+   CORS CONFIG (FIXED)
+========================= */
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-  "https://atm-calls-management-backend-1.onrender.com",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 app.use(
   cors({
-    origin: function (origin, callback) {
+    origin: (origin, callback) => {
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      return callback(null, true); // prevent Swagger/CORS break
+      // allow Swagger / Postman / curl safely
+      return callback(null, true);
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -86,19 +88,17 @@ app.use(
   })
 );
 
+/* =========================
+   PRE-FLIGHT FIX (EXPRESS 5 SAFE)
+========================= */
+app.options(/.*/, cors());
 
-// =========================
-// PRE-FLIGHT
-// =========================
-app.use(cors());
-
-
-// =========================
-// SWAGGER ROUTE (IMPORTANT FIX)
-// =========================
+/* =========================
+   SWAGGER ROUTE
+========================= */
 app.use(
   "/api-docs",
-  cors({ origin: "*" }),
+  cors(),
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec, {
     swaggerOptions: {
@@ -107,17 +107,15 @@ app.use(
   })
 );
 
-
-// =========================
-// BODY PARSER
-// =========================
+/* =========================
+   BODY PARSER
+========================= */
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-
-// =========================
-// SESSION
-// =========================
+/* =========================
+   SESSION
+========================= */
 app.use(
   session({
     store: new PgSession({
@@ -138,17 +136,10 @@ app.use(
   })
 );
 
-
-// =========================
-// RATE LIMITERS
-// =========================
-app.use("/api", otpLimiter);
-app.use("/api", apiLimiter);
-
-
-// =========================
-// ROUTES
-// =========================
+/* =========================
+   ROUTES
+   (rate limiter ONLY on auth)
+========================= */
 app.get("/", (req, res) => {
   res.json({
     message: "ATM Calls Management API running",
@@ -156,22 +147,20 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", otpLimiter, apiLimiter, authRoutes);
 app.use("/atm_calls/tickets", callRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/engineers", engineerRoutes);
 
-
-// =========================
-// ERROR HANDLER (LAST)
-// =========================
+/* =========================
+   ERROR HANDLER (LAST)
+========================= */
 app.use(errorHandler);
 
-
-// =========================
-// CRON
-// =========================
+/* =========================
+   CRON JOB
+========================= */
 cron.schedule("5 0 * * *", async () => {
   console.log("🔔 Running automated reports...");
 
@@ -182,5 +171,12 @@ cron.schedule("5 0 * * *", async () => {
     console.error("❌ Cron error:", err);
   }
 });
+
+/* =========================
+   DB HEALTH CHECK
+========================= */
+pool.query("SELECT 1")
+  .then(() => console.log("🟢 Database connected"))
+  .catch((err) => console.error("❌ Database failed:", err.message));
 
 export default app;
