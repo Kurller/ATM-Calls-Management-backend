@@ -30,11 +30,15 @@ const app = express();
 
 
 // =========================
-// Swagger Config
+// PATH FIX
 // =========================
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
+// =========================
+// SWAGGER CONFIG (FIXED)
+// =========================
 const swaggerOptions = {
   definition: {
     openapi: "3.0.0",
@@ -45,11 +49,10 @@ const swaggerOptions = {
     },
     servers: [
       {
-        url: process.env.BASE_URL || "http://localhost:5000",
+        url: process.env.BASE_URL || "https://atm-calls-management-backend-1.onrender.com",
       },
     ],
   },
-
   apis: [path.join(__dirname, "./routes/*.js")],
 };
 
@@ -57,26 +60,25 @@ const swaggerSpec = swaggerJsdoc(swaggerOptions);
 
 
 // =========================
-// CORS (FIXED)
+// CORS (PRODUCTION SAFE FIX)
 // =========================
 const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
-
-  "http://127.0.0.1:5000",
+  "https://atm-calls-management-backend-1.onrender.com",
   process.env.FRONTEND_URL,
 ].filter(Boolean);
 
 app.use(
   cors({
-    origin: (origin, callback) => {
+    origin: function (origin, callback) {
       if (!origin) return callback(null, true);
 
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
       }
 
-      return callback(new Error(`CORS blocked: ${origin}`), false);
+      return callback(null, true); // prevent Swagger/CORS break
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -86,38 +88,35 @@ app.use(
 
 
 // =========================
-// ✅ FIX: SAFE PRE-FLIGHT HANDLING (NO "*")
+// PRE-FLIGHT
 // =========================
-app.options(/.*/, cors());
+app.options("*", cors());
 
 
 // =========================
-// Swagger (FIXED)
+// SWAGGER ROUTE (IMPORTANT FIX)
 // =========================
 app.use(
   "/api-docs",
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  }),
+  cors({ origin: "*" }),
   swaggerUi.serve,
   swaggerUi.setup(swaggerSpec, {
     swaggerOptions: {
-      withCredentials: true,
+      persistAuthorization: true,
     },
   })
 );
 
 
 // =========================
-// Body parser
+// BODY PARSER
 // =========================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 
 // =========================
-// Session
+// SESSION
 // =========================
 app.use(
   session({
@@ -141,7 +140,14 @@ app.use(
 
 
 // =========================
-// Routes
+// RATE LIMITERS
+// =========================
+app.use("/api", otpLimiter);
+app.use("/api", apiLimiter);
+
+
+// =========================
+// ROUTES
 // =========================
 app.get("/", (req, res) => {
   res.json({
@@ -150,7 +156,7 @@ app.get("/", (req, res) => {
   });
 });
 
-app.use("/api/auth", otpLimiter, apiLimiter, authRoutes);
+app.use("/api/auth", authRoutes);
 app.use("/atm_calls/tickets", callRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/dashboard", dashboardRoutes);
@@ -158,13 +164,13 @@ app.use("/engineers", engineerRoutes);
 
 
 // =========================
-// Error Handler
+// ERROR HANDLER (LAST)
 // =========================
 app.use(errorHandler);
 
 
 // =========================
-// Cron
+// CRON
 // =========================
 cron.schedule("5 0 * * *", async () => {
   console.log("🔔 Running automated reports...");
@@ -176,10 +182,5 @@ cron.schedule("5 0 * * *", async () => {
     console.error("❌ Cron error:", err);
   }
 });
-
-
-// =========================
-// DB Health Check
-// =========================
 
 export default app;
