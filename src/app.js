@@ -181,8 +181,5 @@ cron.schedule("5 0 * * *", async () => {
 // =========================
 // DB Health Check
 // =========================
-pool.query("SELECT 1")
-  .then(() => console.log("🟢 Database connected"))
-  .catch((err) => console.error("❌ Database failed:", err.message));
 
 export default app;
