@@ -1,111 +1,117 @@
-// controllers/authController.js
-import { pool } from "../config/db.js";
+// src/controllers/authController.js
 import bcrypt from "bcrypt";
+import { pool } from "../config/db.js";
+import { sendLoginOTP } from "../services/otpService.js";
 
-// =========================
-// REGISTER
-// =========================
-export const register = async (req, res) => {
-  let { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required" });
-  }
-
+/* -------------------------------
+   Request OTP
+---------------------------------*/
+export const requestLogin = async (req, res) => {
   try {
-    email = email.toLowerCase().trim();
-    password = String(password);
+    const { email } = req.body;
 
-    const userExist = await pool.query(
-      "SELECT id FROM users WHERE email = $1",
-      [email]
-    );
-
-    if (userExist.rows.length) {
-      return res.status(400).json({ message: "User already exists" });
+    if (!email) {
+      return res.status(400).json({ message: "Email is required" });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const result = await pool.query(
-      `INSERT INTO users (email, password) 
-       VALUES ($1, $2) 
-       RETURNING id, email, role`,
-      [email, hashedPassword]
-    );
-
-    return res.status(201).json({
-      message: "User registered successfully",
-      user: result.rows[0],
-    });
-
-  } catch (err) {
-    console.error("register error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
-
-// =========================
-// LOGIN (SESSION BASED)
-// =========================
-export const login = async (req, res) => {
-  let { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required" });
-  }
-
-  try {
-    email = email.toLowerCase().trim();
-    password = String(password);
-
-    const result = await pool.query(
+    const userRes = await pool.query(
       "SELECT * FROM users WHERE email = $1",
       [email]
     );
 
-    if (!result.rows.length) {
-      return res.status(400).json({ message: "Invalid credentials" });
+    if (userRes.rowCount === 0) {
+      return res.status(404).json({ message: "User not found" });
     }
 
-    const user = result.rows[0];
+    const user = userRes.rows[0];
 
-    const isMatch = await bcrypt.compare(password, user.password);
-
-    if (!isMatch) {
-      return res.status(400).json({ message: "Invalid credentials" });
+    // ✅ SAFE: only check if column exists
+    if (user.is_active !== undefined && user.is_active === false) {
+      return res.status(403).json({ message: "Account is disabled" });
     }
 
-    // ✅ STORE USER IN SESSION
+    await sendLoginOTP(user);
+
+    res.json({ message: "OTP sent to email" });
+
+  } catch (err) {
+    console.error("Error in requestLogin:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
+/* -------------------------------
+   Verify OTP
+---------------------------------*/
+export const verifyOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      return res.status(400).json({ message: "Email and OTP are required" });
+    }
+
+    const userRes = await pool.query(
+      "SELECT * FROM users WHERE email = $1",
+      [email]
+    );
+
+    if (userRes.rowCount === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    const user = userRes.rows[0];
+
+    // 🔥 FIX: use EMAIL instead of user_id
+    const otpRes = await pool.query(
+      `SELECT * FROM email_otps
+       WHERE email = $1 AND used = false
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [email]
+    );
+
+    if (otpRes.rowCount === 0) {
+      return res.status(400).json({ message: "OTP expired or invalid" });
+    }
+
+    const otpRecord = otpRes.rows[0];
+
+    // Expiry check
+    if (new Date(otpRecord.expires_at) < new Date()) {
+      return res.status(400).json({ message: "OTP expired" });
+    }
+
+    const isValid = await bcrypt.compare(otp, otpRecord.otp_hash);
+
+    if (!isValid) {
+      return res.status(400).json({ message: "Incorrect OTP" });
+    }
+
+    // ✅ mark OTP used
+    await pool.query(
+      "UPDATE email_otps SET used = true WHERE id = $1",
+      [otpRecord.id]
+    );
+
+    // ✅ session login
     req.session.user = {
       id: user.id,
       email: user.email,
       role: user.role || "user",
+      otpVerified: true,
     };
 
-    return res.json({
-      message: "Login successful",
-      user: req.session.user,
+    req.session.save(() => {
+      res.json({
+        message: "OTP verified successfully",
+        user: req.session.user,
+      });
     });
 
   } catch (err) {
-    console.error("login error:", err);
-    return res.status(500).json({ message: "Server error" });
+    console.error("Error in verifyOTP:", err.message);
+    res.status(500).json({ message: "Server error" });
   }
-};
-
-// =========================
-// LOGOUT
-// =========================
-export const logout = async (req, res) => {
-  req.session.destroy((err) => {
-    if (err) {
-      console.error("logout error:", err);
-      return res.status(500).json({ message: "Logout failed" });
-    }
-
-    res.clearCookie("connect.sid"); // session cookie
-
-    return res.json({ message: "Logged out successfully" });
-  });
 };

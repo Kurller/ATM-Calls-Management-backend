@@ -1,5 +1,5 @@
 import express from "express";
-import { login, verifyOTP } from "../controllers/authController.js";
+import { requestLogin, verifyOTP } from "../controllers/authController.js";
 import { loginLimiter, otpLimiter } from "../middleware/authRateLimiter.js";
 
 const router = express.Router();
@@ -33,7 +33,7 @@ const router = express.Router();
  *       429:
  *         description: Too many requests
  */
-router.post("/request-login", loginLimiter, login);
+router.post("/request-login", loginLimiter, requestLogin);
 
 
 /**
