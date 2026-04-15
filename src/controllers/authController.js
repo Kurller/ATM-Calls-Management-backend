@@ -4,7 +4,7 @@ import { pool } from "../config/db.js";
 import { sendLoginOTP } from "../services/otpService.js";
 
 /* -------------------------------
-   Request OTP
+   REQUEST OTP
 ---------------------------------*/
 export const requestLogin = async (req, res) => {
   try {
@@ -25,24 +25,22 @@ export const requestLogin = async (req, res) => {
 
     const user = userRes.rows[0];
 
-    // ✅ SAFE: only check if column exists
-    if (user.is_active !== undefined && user.is_active === false) {
+    if (user.is_active === false) {
       return res.status(403).json({ message: "Account is disabled" });
     }
 
     await sendLoginOTP(user);
 
-    res.json({ message: "OTP sent to email" });
+    return res.json({ message: "OTP sent to email" });
 
   } catch (err) {
     console.error("Error in requestLogin:", err.message);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
-
 /* -------------------------------
-   Verify OTP
+   VERIFY OTP
 ---------------------------------*/
 export const verifyOTP = async (req, res) => {
   try {
@@ -63,13 +61,13 @@ export const verifyOTP = async (req, res) => {
 
     const user = userRes.rows[0];
 
-    // 🔥 FIX: use EMAIL instead of user_id
+    // ✅ FIX: use user_id (NOT email)
     const otpRes = await pool.query(
       `SELECT * FROM email_otps
-       WHERE email = $1 AND used = false
+       WHERE user_id = $1 AND used = false
        ORDER BY created_at DESC
        LIMIT 1`,
-      [email]
+      [user.id]
     );
 
     if (otpRes.rowCount === 0) {
@@ -78,7 +76,7 @@ export const verifyOTP = async (req, res) => {
 
     const otpRecord = otpRes.rows[0];
 
-    // Expiry check
+    // expiry check
     if (new Date(otpRecord.expires_at) < new Date()) {
       return res.status(400).json({ message: "OTP expired" });
     }
@@ -89,13 +87,13 @@ export const verifyOTP = async (req, res) => {
       return res.status(400).json({ message: "Incorrect OTP" });
     }
 
-    // ✅ mark OTP used
+    // mark OTP as used
     await pool.query(
       "UPDATE email_otps SET used = true WHERE id = $1",
       [otpRecord.id]
     );
 
-    // ✅ session login
+    // session login
     req.session.user = {
       id: user.id,
       email: user.email,
@@ -104,7 +102,7 @@ export const verifyOTP = async (req, res) => {
     };
 
     req.session.save(() => {
-      res.json({
+      return res.json({
         message: "OTP verified successfully",
         user: req.session.user,
       });
@@ -112,6 +110,6 @@ export const verifyOTP = async (req, res) => {
 
   } catch (err) {
     console.error("Error in verifyOTP:", err.message);
-    res.status(500).json({ message: "Server error" });
+    return res.status(500).json({ message: "Server error" });
   }
 };
