@@ -1,93 +1,174 @@
-// src/controllers/authController.js
-import bcrypt from "bcrypt";
+// controllers/authController.js
 import { pool } from "../config/db.js";
-import { sendLoginOTP } from "../services/otpService.js";
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
 
-/* -------------------------------
-   Request OTP
----------------------------------*/
-export const requestLogin = async (req, res) => {
+dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "1h";
+const REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN || "7d";
+
+// =========================
+// REGISTER
+// =========================
+export const register = async (req, res) => {
+  let { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required" });
+  }
+
   try {
-    const { email } = req.body;
+    email = email.toLowerCase().trim();
+    password = String(password);
 
-    const userRes = await pool.query(
-      "SELECT * FROM users WHERE email = $1 AND is_active = true",
+    const userExist = await pool.query(
+      "SELECT id FROM users WHERE email = $1",
       [email]
     );
 
-    if (userRes.rowCount === 0) {
-      return res.status(404).json({ message: "User not found" });
+    if (userExist.rows.length) {
+      return res.status(400).json({ message: "User already exists" });
     }
 
-    await sendLoginOTP(userRes.rows[0]);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    res.json({ message: "OTP sent to email" });
+    const result = await pool.query(
+      `INSERT INTO users (email, password) 
+       VALUES ($1, $2) 
+       RETURNING id, email, role`,
+      [email, hashedPassword]
+    );
+
+    const user = result.rows[0];
+
+    const payload = {
+      id: user.id,
+      email: user.email,
+      role: user.role || "user",
+    };
+
+    const accessToken = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN,
+    });
+
+    const refreshToken = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: REFRESH_TOKEN_EXPIRES_IN,
+    });
+
+    return res.status(201).json({
+      message: "User registered successfully",
+      user,
+      accessToken,
+      refreshToken,
+    });
   } catch (err) {
-    console.error("Error in requestLogin:", err.message);
-    res.status(500).json({ message: "Server error" });
+    console.error("register error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
-/* -------------------------------
-   Verify OTP
----------------------------------*/
-export const verifyOTP = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
+// =========================
+// LOGIN
+// =========================
+export const login = async (req, res) => {
+  let { email, password } = req.body;
 
-    const userRes = await pool.query(
+  if (!email || !password) {
+    return res.status(400).json({ message: "Email and password are required" });
+  }
+
+  try {
+    email = email.toLowerCase().trim();
+    password = String(password);
+
+    const result = await pool.query(
       "SELECT * FROM users WHERE email = $1",
       [email]
     );
 
-    if (userRes.rowCount === 0) {
-      return res.status(404).json({ message: "User not found" });
+    if (!result.rows.length) {
+      return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    const user = userRes.rows[0];
+    const user = result.rows[0];
 
-    const otpRes = await pool.query(
-      `SELECT * FROM email_otps
-       WHERE user_id = $1 AND used = false
-       ORDER BY created_at DESC LIMIT 1`,
-      [user.id]
-    );
-
-    if (otpRes.rowCount === 0) {
-      return res.status(400).json({ message: "OTP expired or invalid" });
+    // 🔥 SAFE: only check if column exists
+    if (user.is_active !== undefined && user.is_active === false) {
+      return res.status(403).json({ message: "Account is disabled" });
     }
 
-    const otpRecord = otpRes.rows[0];
+    const isMatch = await bcrypt.compare(password, user.password);
 
-    if (otpRecord.expires_at < new Date()) {
-      return res.status(400).json({ message: "OTP expired" });
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid credentials" });
     }
 
-    const isValid = await bcrypt.compare(otp, otpRecord.otp_hash);
-
-    if (!isValid) {
-      return res.status(400).json({ message: "Incorrect OTP" });
-    }
-
-    // Mark OTP as used
-    await pool.query("UPDATE email_otps SET used = true WHERE id = $1", [
-      otpRecord.id,
-    ]);
-
-    // ✅ Create session for OTP-verified user
-    req.session.user = {
+    const payload = {
       id: user.id,
-      role: user.role,
-      otpVerified: true,
-      otpExpiresAt: otpRecord.expires_at,
+      email: user.email,
+      role: user.role || "user",
     };
 
-    // Save session and respond
-    req.session.save(() => {
-      res.json({ message: "OTP verified successfully" });
+    const accessToken = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN,
+    });
+
+    const refreshToken = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: REFRESH_TOKEN_EXPIRES_IN,
+    });
+
+    return res.json({
+      message: "Login successful",
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role || "user",
+      },
+      accessToken,
+      refreshToken,
     });
   } catch (err) {
-    console.error("Error in verifyOTP:", err.message);
-    res.status(500).json({ message: "Server error" });
+    console.error("login error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
+};
+
+// =========================
+// REFRESH TOKEN
+// =========================
+export const refresh = async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(401).json({ message: "No refresh token provided" });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_SECRET);
+
+    const payload = {
+      id: decoded.id,
+      email: decoded.email,
+      role: decoded.role || "user",
+    };
+
+    const accessToken = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN,
+    });
+
+    return res.json({ accessToken });
+  } catch (err) {
+    console.error("refresh token error:", err.message);
+    return res.status(401).json({ message: "Invalid refresh token" });
+  }
+};
+
+// =========================
+// LOGOUT
+// =========================
+export const logout = async (req, res) => {
+  return res.json({ message: "Logged out successfully" });
 };
