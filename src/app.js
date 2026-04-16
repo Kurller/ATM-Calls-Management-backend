@@ -148,7 +148,7 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", otpLimiter, apiLimiter, authRoutes);
-app.use("/atm_calls/tickets", callRoutes);
+app.use("/api/calls", callRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/engineers", engineerRoutes);
