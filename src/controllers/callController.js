@@ -369,84 +369,111 @@ export const getCallsByStatus = async (req, res) => {
   }
 };
 // ✅ AUTO ASSIGN TICKET
-export const autoAssignTicket = async (req, res) => {
+export const autoAssignTicket = async (req, res, next) => {
   const { ticketId } = req.params;
 
-  const ticketResult = await pool.query(
-    "SELECT id, atm_id, location, issue_type, engineer_id FROM atm_calls WHERE id = $1",
-    [ticketId]
-  );
+  const client = await pool.connect();
 
-  if (!ticketResult.rows.length) {
-    const error = new Error("Ticket not found");
-    error.status = 404;
-    throw error;
-  }
-
-  const ticket = ticketResult.rows[0];
-
-  if (ticket.engineer_id) {
-    const error = new Error("Ticket already assigned");
-    error.status = 400;
-    throw error;
-  }
-
-  const engineerResult = await pool.query(`
-    SELECT e.id, e.name, e.email, COUNT(c.id) AS workload
-    FROM engineers e
-    LEFT JOIN atm_calls c
-    ON e.id = c.engineer_id AND c.status != 'closed'
-    GROUP BY e.id
-    ORDER BY workload ASC
-    LIMIT 1
-  `);
-
-  if (!engineerResult.rows.length) {
-    const error = new Error("No engineers available");
-    error.status = 400;
-    throw error;
-  }
-
-  const engineer = engineerResult.rows[0];
-
-  const updateResult = await pool.query(`
-    UPDATE atm_calls 
-    SET engineer_id = $1, status = 'in-progress'
-    WHERE id = $2 
-    RETURNING *
-  `, [engineer.id, ticketId]);
-
-  const updatedTicket = updateResult.rows[0];
-
-  await pool.query(
-    `INSERT INTO ticket_assignment_history 
-     (atm_call_id, engineer_id, assigned_at) 
-     VALUES ($1,$2,NOW())`,
-    [ticketId, engineer.id]
-  );
-
-  // -----------------------------
-  // Notify Engineer
-  // -----------------------------
   try {
-    await sendAssignmentEmail({
-      engineerName: engineer.name,
-      engineerEmail: engineer.email,
-      ticket: updatedTicket,
-    });
-  } catch (err) {
-    console.error("Engineer notification failed:", err.message);
-  }
+    await client.query("BEGIN");
 
-  // -----------------------------
-  // Notify Admins
-  // -----------------------------
-  try {
-    const { rows: admins } = await pool.query(
-      `SELECT email FROM users WHERE role = 'admin'`
+    // -----------------------------
+    // Get Ticket (lock row to prevent double assignment)
+    // -----------------------------
+    const ticketResult = await client.query(
+      `SELECT id, atm_id, location, issue_type, engineer_id, status
+       FROM atm_calls
+       WHERE id = $1
+       FOR UPDATE`,
+      [ticketId]
     );
 
-    const message = `
+    if (!ticketResult.rows.length) {
+      const error = new Error("Ticket not found");
+      error.status = 404;
+      throw error;
+    }
+
+    const ticket = ticketResult.rows[0];
+
+    if (ticket.engineer_id) {
+      const error = new Error("Ticket already assigned");
+      error.status = 400;
+      throw error;
+    }
+
+    // -----------------------------
+    // Find least busy engineer
+    // -----------------------------
+    const engineerResult = await client.query(`
+      SELECT e.id, e.name, e.email, COUNT(c.id) AS workload
+      FROM engineers e
+      LEFT JOIN atm_calls c
+        ON e.id = c.engineer_id AND c.status != 'closed'
+      GROUP BY e.id
+      ORDER BY workload ASC
+      LIMIT 1
+      FOR UPDATE
+    `);
+
+    if (!engineerResult.rows.length) {
+      const error = new Error("No engineers available");
+      error.status = 400;
+      throw error;
+    }
+
+    const engineer = engineerResult.rows[0];
+
+    // -----------------------------
+    // Assign ticket
+    // -----------------------------
+    const updateResult = await client.query(
+      `
+      UPDATE atm_calls
+      SET engineer_id = $1,
+          status = 'in-progress',
+          updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+      `,
+      [engineer.id, ticketId]
+    );
+
+    const updatedTicket = updateResult.rows[0];
+
+    // -----------------------------
+    // Save assignment history
+    // -----------------------------
+    await client.query(
+      `
+      INSERT INTO ticket_assignment_history
+      (atm_call_id, engineer_id, assigned_at)
+      VALUES ($1, $2, NOW())
+      `,
+      [ticketId, engineer.id]
+    );
+
+    await client.query("COMMIT");
+
+    // -----------------------------
+    // Notifications (outside transaction)
+    // -----------------------------
+    try {
+      await sendAssignmentEmail({
+        engineerName: engineer.name,
+        engineerEmail: engineer.email,
+        ticket: updatedTicket,
+      });
+    } catch (err) {
+      console.error("Engineer email failed:", err.message);
+    }
+
+    try {
+      const { rows: admins } = await pool.query(
+        `SELECT email FROM users WHERE role = 'admin'`
+      );
+
+      const message = `
 Ticket Auto Assigned
 
 Ticket ID: ${updatedTicket.id}
@@ -455,18 +482,24 @@ Location: ${updatedTicket.location}
 Issue: ${updatedTicket.issue_type}
 
 Assigned Engineer: ${engineer.name}
-    `;
+      `;
 
-    for (const admin of admins) {
-      await sendEmail(admin.email, "ATM Ticket Auto Assigned", message);
+      for (const admin of admins) {
+        await sendEmail(admin.email, "ATM Ticket Auto Assigned", message);
+      }
+    } catch (err) {
+      console.error("Admin notification failed:", err.message);
     }
 
-  } catch (err) {
-    console.error("Admin notification failed:", err.message);
-  }
+    return res.status(200).json({
+      message: `Ticket auto-assigned to ${engineer.name}`,
+      ticket: updatedTicket,
+    });
 
-  res.json({
-    message: `Ticket auto-assigned to ${engineer.name}`,
-    ticket: updatedTicket,
-  });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    return next(error);
+  } finally {
+    client.release();
+  }
 };
