@@ -34,7 +34,10 @@ const router = express.Router();
  *         application/json:
  *           schema:
  *             type: object
- *             required: [atm_id, issue]
+ *             required: [ atm_id
+ *               , bank_name
+ *                location,
+ *                issue_type]
  *             properties:
  *               atm_id:
  *                 type: string

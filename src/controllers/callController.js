@@ -29,70 +29,53 @@ const sendEmail = async (to, subject, text) => {
 // CREATE ATM CALL
 // ----------------------
 export const createCall = async (req, res) => {
-  const { atm_id, bank_name, location, issue_type, priority, assigned_to } = req.body;
+  const {
+    atm_id,
+    bank_name,
+    location,
+    issue_type,
+    issue, // 👈 from Swagger
+    priority,
+    assigned_to
+  } = req.body;
+
   const created_by = req.session.user?.id;
 
   if (!created_by) {
     return res.status(401).json({ error: "User not authenticated" });
   }
 
-  if (!atm_id || !bank_name || !location || !issue_type) {
-    return res.status(400).json({ error: "ATM ID, bank name, location, and issue type are required" });
+  // ✅ Map Swagger field
+  const finalIssueType = issue_type || issue;
+
+  if (!atm_id || !bank_name || !location || !finalIssueType) {
+    return res.status(400).json({
+      error: "atm_id, bank_name, location and issue_type are required",
+    });
   }
 
   let normalizedPriority = priority?.trim().toLowerCase() || "low";
-  if (!allowedPriorities.includes(normalizedPriority)) normalizedPriority = "low";
+  if (!allowedPriorities.includes(normalizedPriority)) {
+    normalizedPriority = "low";
+  }
 
-  // Insert ticket into DB
   const result = await pool.query(
     `INSERT INTO atm_calls
       (atm_id, bank_name, location, issue_type, priority, created_by, assigned_to, created_at)
      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
      RETURNING *`,
-    [atm_id, bank_name, location, issue_type, normalizedPriority, created_by, assigned_to || null]
+    [
+      atm_id,
+      bank_name,
+      location,
+      finalIssueType, // ✅ FIXED
+      normalizedPriority,
+      created_by,
+      assigned_to || null,
+    ]
   );
 
   const ticket = result.rows[0];
-  console.log("Ticket created:", ticket);
-
-  // ----------------------------
-  // Notify Admins
-  // ----------------------------
-  try {
-    const { rows: admins } = await pool.query(`SELECT email FROM users WHERE role = 'admin'`);
-    console.log(`Admins found: ${admins.length}`);
-    admins.forEach(a => console.log("Admin email:", a.email));
-
-    if (admins.length > 0) {
-      const message = `
-New ATM Ticket Created
-
-ATM ID: ${ticket.atm_id}
-Bank: ${ticket.bank_name}
-Location: ${ticket.location}
-Issue: ${ticket.issue_type}
-Priority: ${ticket.priority}
-      `;
-
-      // Send all emails concurrently
-      await Promise.all(admins.map(a => sendEmail(a.email, "New ATM Ticket Created", message)));
-    } else {
-      console.warn("No admin users found in the database.");
-    }
-  } catch (err) {
-    console.error("Error fetching or notifying admins:", err.message);
-  }
-
-  // ----------------------------
-  // Notify Engineer if assigned
-  // ----------------------------
-  if (ticket.assigned_to) {
-    try {
-      await sendAssignmentEmail(ticket);
-    } catch (err) {
-      console.error("Engineer notification failed:", err.message);
-    }
-  }
 
   res.status(201).json({
     message: "ATM call ticket created successfully",
