@@ -21,33 +21,42 @@ const router = express.Router();
 /* ==================== TICKET CRUD ==================== */
 
 /**
+ * /**
  * @swagger
- * /atm_calls/tickets:
+ * /api/calls:
  *   post:
- *     summary: Create a new ATM ticket
- *     tags: [Tickets]
- *     security:
- *       - cookieAuth: []
+ *     summary: Create ATM call
+ *     tags: [ATM Calls]
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required: [ atm_id
- *               , bank_name
- *                location,
- *                issue_type]
+ *             required:
+ *               - atm_id
+ *               - bank_name
+ *               - location
+ *               - issue_type
  *             properties:
  *               atm_id:
  *                 type: string
  *                 example: ATM_001
- *               issue:
+ *               bank_name:
+ *                 type: string
+ *                 example: GTBank
+ *               location:
+ *                 type: string
+ *                 example: Lagos Island
+ *               issue_type:
  *                 type: string
  *                 example: Cash dispenser error
- *     responses:
- *       201:
- *         description: Ticket created
+ *               priority:
+ *                 type: string
+ *                 example: high
+ *               assigned_to:
+ *                 type: string
+ *                 example: engineer_id_here
  */
 router.post("/", requireOtpVerified, createCall);
 
