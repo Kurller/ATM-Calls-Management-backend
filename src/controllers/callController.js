@@ -31,45 +31,56 @@ const sendEmail = async (to, subject, text) => {
 export const createCall = async (req, res) => {
   const {
     atm_id,
-    bank_name,
-    location,
-    issue_type,
+    title,
+    description,
     priority,
-    assigned_to
+    assigned_to,
   } = req.body;
 
   const created_by = req.session.user?.id;
 
+  // ✅ Auth check
   if (!created_by) {
     return res.status(401).json({ error: "User not authenticated" });
   }
 
-  if (!atm_id || !bank_name || !location || !issue_type) {
+  // ✅ Validation
+  if (!atm_id || !title) {
     return res.status(400).json({
-      error: "atm_id, bank_name, location, issue_type are required",
+      error: "atm_id and title are required",
     });
   }
 
-  const result = await pool.query(
-    `INSERT INTO atm_calls
-      (atm_id, bank_name, location, issue_type, priority, created_by, assigned_to, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-     RETURNING *`,
-    [
-      atm_id,
-      bank_name,
-      location,
-      issue_type,
-      priority || "medium",
-      created_by,
-      assigned_to || null
-    ]
-  );
+  // ✅ Priority fallback
+  const normalizedPriority = priority || "medium";
 
-  return res.status(201).json({
-    message: "ATM call created successfully",
-    call: result.rows[0],
-  });
+  try {
+    const result = await pool.query(
+      `INSERT INTO atm_calls
+        (atm_id, title, description, priority, created_by, assigned_to)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING *`,
+      [
+        atm_id,
+        title,
+        description || null,
+        normalizedPriority,
+        created_by,
+        assigned_to || null,
+      ]
+    );
+
+    return res.status(201).json({
+      message: "ATM call created successfully",
+      call: result.rows[0],
+    });
+
+  } catch (error) {
+    console.error("CreateCall error:", error);
+    return res.status(500).json({
+      error: "Internal server error",
+    });
+  }
 };
 // ✅ GET ALL TICKETS
 export const getTickets = async (req, res) => {
