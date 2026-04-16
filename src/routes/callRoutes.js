@@ -22,44 +22,35 @@ const router = express.Router();
 /**
  * @swagger
  * /api/calls:
- *   post:
- *     summary: Create ATM call
+ *   get:
+ *     summary: Get all ATM tickets
  *     tags: [ATM Calls]
  *     security:
  *       - cookieAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - atm_id
- *               - bank_name
- *               - location
- *               - issue_type
- *             properties:
- *               atm_id:
- *                 type: string
- *                 example: ATM_001
- *               bank_name:
- *                 type: string
- *                 example: GTBank
- *               location:
- *                 type: string
- *                 example: Lagos Island
- *               issue_type:
- *                 type: string
- *                 example: Cash dispenser error
- *               priority:
- *                 type: string
- *                 example: high
- *               assigned_to:
- *                 type: string
- *                 example: engineer_uuid_here
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           example: open
+ *       - in: query
+ *         name: priority
+ *         schema:
+ *           type: string
+ *           example: high
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           example: 10
  *     responses:
- *       201:
- *         description: Ticket created successfully
+ *       200:
+ *         description: Ticket created succesfully
  */
 router.post("/", requireOtpVerified, createCall);
 
@@ -92,8 +83,34 @@ router.get("/status", requireOtpVerified, getCallsByStatus);
  * @swagger
  * /api/calls:
  *   get:
- *     summary: Get all tickets
+ *     summary: Get all ATM tickets
  *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           example: open
+ *       - in: query
+ *         name: priority
+ *         schema:
+ *           type: string
+ *           example: high
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           example: 10
+ *     responses:
+ *       200:
+ *         description: List of tickets
  */
 router.get("/", requireOtpVerified, getTickets);
 
@@ -105,19 +122,106 @@ router.get("/", requireOtpVerified, getTickets);
  *   get:
  *     summary: Get a single ticket
  *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ticketId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: 123
+ *     responses:
+ *       200:
+ *         description: Ticket details
  */
 router.get("/:ticketId", requireOtpVerified, getTicketById);
 
 /* ==================== UPDATE ==================== */
-
+/**
+ * @swagger
+ * /api/calls/{ticketId}:
+ *   patch:
+ *     summary: Update ticket
+ *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ticketId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 example: resolved
+ *               priority:
+ *                 type: string
+ *                 example: high
+ *     responses:
+ *       200:
+ *         description: Ticket updated
+ */
 router.patch("/:ticketId", requireOtpVerified, updateTicket);
 
 /* ==================== DELETE ==================== */
-
+/**
+ * @swagger
+ * /api/calls/{ticketId}:
+ *   delete:
+ *     summary: Delete ticket
+ *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ticketId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Ticket deleted
+ */
 router.delete("/:ticketId", requireOtpVerified, requireAdmin(), deleteTicket);
 
 /* ==================== ASSIGN ==================== */
-
+/**
+ * @swagger
+ * /api/calls/{ticketId}/assign:
+ *   patch:
+ *     summary: Assign ticket to engineer
+ *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ticketId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - engineer_id
+ *             properties:
+ *               engineer_id:
+ *                 type: string
+ *                 example: c6d91434-4f75-40db-824d-63a020982caa
+ *     responses:
+ *       200:
+ *         description: Engineer assigned
+ */
 router.patch(
   "/:ticketId/assign",
   requireOtpVerified,
@@ -126,8 +230,25 @@ router.patch(
 );
 
 /* ==================== STATUS UPDATE ==================== */
-
-router.patch(
+/**
+ * @swagger
+ * /api/calls/status:
+ *   get:
+ *     summary: Get tickets by status
+ *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         required: true
+ *         schema:
+ *           type: string
+ *           example: open
+ *     responses:
+ *       200:
+ *         description: Filtered tickets
+ */router.patch(
   "/:ticketId/status",
   requireOtpVerified,
   requireAdmin(true),
@@ -135,7 +256,15 @@ router.patch(
 );
 
 /* ==================== HISTORY ==================== */
-
+/**
+ * @swagger
+ * /api/calls/{ticketId}/history:
+ *   get:
+ *     summary: Get ticket history
+ *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ */
 router.get(
   "/:ticketId/history",
   requireOtpVerified,
@@ -144,7 +273,15 @@ router.get(
 );
 
 /* ==================== AUTO ASSIGN ==================== */
-
+/**
+ * @swagger
+ * /api/calls/{ticketId}/auto-assign:
+ *   patch:
+ *     summary: Auto assign ticket
+ *     tags: [ATM Calls]
+ *     security:
+ *       - cookieAuth: []
+ */
 router.patch(
   "/:ticketId/auto-assign",
   requireOtpVerified,
