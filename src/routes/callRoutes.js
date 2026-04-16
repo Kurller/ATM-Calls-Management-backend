@@ -264,6 +264,16 @@ router.patch(
  *     tags: [ATM Calls]
  *     security:
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ticketId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: c6d91434-4f75-40db-824d-63a020982caa
+ *     responses:
+ *       200:
+ *         description: Ticket history retrieved successfully
  */
 router.get(
   "/:ticketId/history",
@@ -277,10 +287,24 @@ router.get(
  * @swagger
  * /api/calls/{ticketId}/auto-assign:
  *   patch:
- *     summary: Auto assign ticket
+ *     summary: Auto assign ticket to least busy engineer
  *     tags: [ATM Calls]
  *     security:
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: ticketId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: c6d91434-4f75-40db-824d-63a020982caa
+ *     responses:
+ *       200:
+ *         description: Ticket auto-assigned successfully
+ *       400:
+ *         description: Ticket already assigned or no engineers available
+ *       404:
+ *         description: Ticket not found
  */
 router.patch(
   "/:ticketId/auto-assign",
