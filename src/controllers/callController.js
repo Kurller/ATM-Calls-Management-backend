@@ -85,25 +85,22 @@ export const getTickets = async (req, res) => {
     const user = req.session.user;
 
     if (!user) {
-      return res.status(401).json({
-        message: "User not authenticated"
-      });
+      return res.status(401).json({ message: "User not authenticated" });
     }
 
     const {
       status,
       priority,
-      bank_name,
       page = 1,
       limit = 10,
       sort = "created_at",
       order = "desc",
     } = req.query;
 
-    const sortColumn = allowedSortColumns.includes(sort)
-      ? sort
-      : "created_at";
+    const allowedSortColumns = ["created_at", "priority", "status", "atm_id"];
+    const allowedOrder = ["asc", "desc"];
 
+    const sortColumn = allowedSortColumns.includes(sort) ? sort : "created_at";
     const sortOrder = allowedOrder.includes(order.toLowerCase())
       ? order.toUpperCase()
       : "DESC";
@@ -111,24 +108,20 @@ export const getTickets = async (req, res) => {
     const values = [];
     const whereClauses = [];
 
+    // 🔐 Restrict non-admin users
     if (user.role !== "admin") {
       values.push(user.id);
-      whereClauses.push(`created_by = $${values.length}`);
+      whereClauses.push(`c.created_by = $${values.length}`);
     }
 
     if (status) {
       values.push(status);
-      whereClauses.push(`status = $${values.length}`);
+      whereClauses.push(`c.status = $${values.length}`);
     }
 
     if (priority) {
       values.push(priority);
-      whereClauses.push(`priority = $${values.length}`);
-    }
-
-    if (bank_name) {
-      values.push(bank_name);
-      whereClauses.push(`bank_name = $${values.length}`);
+      whereClauses.push(`c.priority = $${values.length}`);
     }
 
     const whereQuery = whereClauses.length
@@ -141,10 +134,15 @@ export const getTickets = async (req, res) => {
     values.push(limitVal, offsetVal);
 
     const query = `
-      SELECT * FROM atm_calls
+      SELECT 
+        c.*,
+        u.email AS assigned_to_name
+      FROM atm_calls c
+      LEFT JOIN users u ON c.assigned_to = u.id
       ${whereQuery}
-      ORDER BY ${sortColumn} ${sortOrder}
-      LIMIT $${values.length - 1} OFFSET $${values.length}
+      ORDER BY c.${sortColumn} ${sortOrder}
+      LIMIT $${values.length - 1}
+      OFFSET $${values.length}
     `;
 
     const result = await pool.query(query, values);
@@ -159,8 +157,8 @@ export const getTickets = async (req, res) => {
   } catch (err) {
     console.error("getTickets error:", err);
     return res.status(500).json({
-      message: "Server error",
-      error: err.message
+      message: "Failed to fetch tickets",
+      error: err.message,
     });
   }
 };
