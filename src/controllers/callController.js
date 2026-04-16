@@ -85,20 +85,19 @@ export const createCall = async (req, res) => {
 // ✅ GET ALL TICKETS
 export const getTickets = async (req, res) => {
   const user = req.session.user;
-  if (!user) throw Object.assign(new Error("User not authenticated"), { status: 401 });
+
+  if (!user) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
 
   const {
     status,
     priority,
-    bank_name,
     page = 1,
     limit = 10,
     sort = "created_at",
     order = "desc",
   } = req.query;
-
-  const sortColumn = allowedSortColumns.includes(sort) ? sort : "created_at";
-  const sortOrder = allowedOrder.includes(order.toLowerCase()) ? order.toUpperCase() : "DESC";
 
   const values = [];
   const whereClauses = [];
@@ -107,40 +106,38 @@ export const getTickets = async (req, res) => {
     values.push(user.id);
     whereClauses.push(`created_by = $${values.length}`);
   }
+
   if (status) {
     values.push(status);
     whereClauses.push(`status = $${values.length}`);
   }
+
   if (priority) {
     values.push(priority);
     whereClauses.push(`priority = $${values.length}`);
   }
-  if (bank_name) {
-    values.push(bank_name);
-    whereClauses.push(`bank_name = $${values.length}`);
-  }
 
-  const whereQuery = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+  const whereQuery = whereClauses.length
+    ? `WHERE ${whereClauses.join(" AND ")}`
+    : "";
 
-  // Ensure LIMIT and OFFSET are numbers
-  const limitVal = parseInt(limit) || 10;
-  const offsetVal = ((parseInt(page) || 1) - 1) * limitVal;
+  const limitVal = Number(limit) || 10;
+  const offsetVal = ((Number(page) || 1) - 1) * limitVal;
 
-  // Add LIMIT and OFFSET as the next parameters
   values.push(limitVal, offsetVal);
 
-  // `$${values.length -1}` = LIMIT, `$${values.length}` = OFFSET
   const query = `
     SELECT * FROM atm_calls
     ${whereQuery}
-    ORDER BY ${sortColumn} ${sortOrder}
-    LIMIT $${values.length - 1} OFFSET $${values.length}
+    ORDER BY created_at DESC
+    LIMIT $${values.length - 1}
+    OFFSET $${values.length}
   `;
 
   const result = await pool.query(query, values);
 
-  res.json({
-    page: parseInt(page),
+  return res.json({
+    page: Number(page),
     limit: limitVal,
     total: result.rowCount,
     tickets: result.rows,
