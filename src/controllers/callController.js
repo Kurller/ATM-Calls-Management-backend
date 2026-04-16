@@ -29,57 +29,47 @@ const sendEmail = async (to, subject, text) => {
 // CREATE ATM CALL
 // ----------------------
 export const createCall = async (req, res) => {
-  try {
-    const {
-      atm_id,
-      title,
-      description,
-      issue,
-      priority,
-      assigned_to
-    } = req.body;
+  const {
+    atm_id,
+    bank_name,
+    location,
+    issue_type,
+    priority,
+    assigned_to
+  } = req.body;
 
-    const created_by = req.session.user?.id;
+  const created_by = req.session.user?.id;
 
-    if (!created_by) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+  if (!created_by) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
 
-    const finalTitle = title || `ATM Issue ${atm_id}`;
-    const finalDescription = description || issue;
-
-    if (!atm_id || !finalDescription) {
-      return res.status(400).json({
-        error: "atm_id and description are required"
-      });
-    }
-
-    const result = await pool.query(
-      `INSERT INTO atm_calls
-        (atm_id, title, description, priority, created_by, assigned_to)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING *`,
-      [
-        atm_id,
-        finalTitle,
-        finalDescription,
-        priority || "medium",
-        created_by,
-        assigned_to || null
-      ]
-    );
-
-    return res.status(201).json({
-      message: "Ticket created successfully",
-      call: result.rows[0]
-    });
-
-  } catch (err) {
-    console.error("CREATE CALL ERROR:", err);
-    return res.status(500).json({
-      error: "Internal server error"
+  if (!atm_id || !bank_name || !location || !issue_type) {
+    return res.status(400).json({
+      error: "atm_id, bank_name, location, issue_type are required",
     });
   }
+
+  const result = await pool.query(
+    `INSERT INTO atm_calls
+      (atm_id, bank_name, location, issue_type, priority, created_by, assigned_to, created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+     RETURNING *`,
+    [
+      atm_id,
+      bank_name,
+      location,
+      issue_type,
+      priority || "medium",
+      created_by,
+      assigned_to || null
+    ]
+  );
+
+  return res.status(201).json({
+    message: "ATM call created successfully",
+    call: result.rows[0],
+  });
 };
 // ✅ GET ALL TICKETS
 export const getTickets = async (req, res) => {
