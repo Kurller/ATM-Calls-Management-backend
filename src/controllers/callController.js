@@ -29,58 +29,62 @@ const sendEmail = async (to, subject, text) => {
 // CREATE ATM CALL
 // ----------------------
 export const createCall = async (req, res) => {
-  const {
-    atm_id,
-    bank_name,
-    location,
-    issue_type,
-    issue, // 👈 from Swagger
-    priority,
-    assigned_to
-  } = req.body;
-
-  const created_by = req.session.user?.id;
-
-  if (!created_by) {
-    return res.status(401).json({ error: "User not authenticated" });
-  }
-
-  // ✅ Map Swagger field
-  const finalIssueType = issue_type || issue;
-
-  if (!atm_id || !bank_name || !location || !finalIssueType) {
-    return res.status(400).json({
-      error: "atm_id, bank_name, location and issue_type are required",
-    });
-  }
-
-  let normalizedPriority = priority?.trim().toLowerCase() || "low";
-  if (!allowedPriorities.includes(normalizedPriority)) {
-    normalizedPriority = "low";
-  }
-
-  const result = await pool.query(
-    `INSERT INTO atm_calls
-      (atm_id, bank_name, location, issue_type, priority, created_by, assigned_to, created_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
-     RETURNING *`,
-    [
+  try {
+    const {
       atm_id,
-      bank_name,
-      location,
-      finalIssueType, // ✅ FIXED
-      normalizedPriority,
-      created_by,
-      assigned_to || null,
-    ]
-  );
+      title,
+      description,
+      issue, // fallback from Swagger
+      priority,
+      assigned_to
+    } = req.body;
 
-  const ticket = result.rows[0];
+    const created_by = req.session.user?.id;
 
-  res.status(201).json({
-    message: "ATM call ticket created successfully",
-    call: ticket,
-  });
+    if (!created_by) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    // Map Swagger "issue" → description
+    const finalDescription = description || issue;
+
+    if (!atm_id || !title || !finalDescription) {
+      return res.status(400).json({
+        error: "atm_id, title and description are required",
+      });
+    }
+
+    let normalizedPriority = priority?.trim().toLowerCase() || "medium";
+    if (!allowedPriorities.includes(normalizedPriority)) {
+      normalizedPriority = "medium";
+    }
+
+    const result = await pool.query(
+      `INSERT INTO atm_calls
+        (atm_id, title, description, priority, created_by, assigned_to)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING *`,
+      [
+        atm_id,
+        title,
+        finalDescription,
+        normalizedPriority,
+        created_by,
+        assigned_to || null,
+      ]
+    );
+
+    const ticket = result.rows[0];
+
+    res.status(201).json({
+      message: "ATM call ticket created successfully",
+      call: ticket,
+    });
+
+  } catch (err) {
+    console.error("createCall error:", err.message);
+    res.status(500).json({ error: "Server error" });
+  }
 };
 // ✅ GET ALL TICKETS
 export const getTickets = async (req, res) => {
