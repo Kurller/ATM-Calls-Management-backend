@@ -29,32 +29,31 @@ const sendEmail = async (to, subject, text) => {
 // CREATE ATM CALL
 // ----------------------
 export const createCall = async (req, res) => {
-  const {
-    atm_id,
-    title,
-    description,
-    priority,
-    assigned_to,
-  } = req.body;
-
-  const created_by = req.session.user?.id;
-
-  // ✅ Auth check
-  if (!created_by) {
-    return res.status(401).json({ error: "User not authenticated" });
-  }
-
-  // ✅ Validation
-  if (!atm_id || !title) {
-    return res.status(400).json({
-      error: "atm_id and title are required",
-    });
-  }
-
-  // ✅ Priority fallback
-  const normalizedPriority = priority || "medium";
-
   try {
+    const {
+      atm_id,
+      title,
+      description,
+      priority,
+      assigned_to
+    } = req.body;
+
+    const created_by = req.session.user?.id;
+
+    if (!created_by) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+
+    if (!atm_id || !title) {
+      return res.status(400).json({
+        error: "atm_id and title are required",
+      });
+    }
+
+    // validate UUID (VERY IMPORTANT)
+    const safeAssignedTo =
+      assigned_to && assigned_to !== "" ? assigned_to : null;
+
     const result = await pool.query(
       `INSERT INTO atm_calls
         (atm_id, title, description, priority, created_by, assigned_to)
@@ -64,9 +63,9 @@ export const createCall = async (req, res) => {
         atm_id,
         title,
         description || null,
-        normalizedPriority,
+        priority || "medium",
         created_by,
-        assigned_to || null,
+        safeAssignedTo,
       ]
     );
 
@@ -75,73 +74,95 @@ export const createCall = async (req, res) => {
       call: result.rows[0],
     });
 
-  } catch (error) {
-    console.error("CreateCall error:", error);
-    return res.status(500).json({
-      error: "Internal server error",
-    });
+  } catch (err) {
+    console.error("CreateCall error:", err);
+    return res.status(500).json({ error: "Server error", details: err.message });
   }
 };
 // ✅ GET ALL TICKETS
 export const getTickets = async (req, res) => {
-  const user = req.session.user;
+  try {
+    const user = req.session.user;
 
-  if (!user) {
-    return res.status(401).json({ error: "User not authenticated" });
+    if (!user) {
+      return res.status(401).json({
+        message: "User not authenticated"
+      });
+    }
+
+    const {
+      status,
+      priority,
+      bank_name,
+      page = 1,
+      limit = 10,
+      sort = "created_at",
+      order = "desc",
+    } = req.query;
+
+    const sortColumn = allowedSortColumns.includes(sort)
+      ? sort
+      : "created_at";
+
+    const sortOrder = allowedOrder.includes(order.toLowerCase())
+      ? order.toUpperCase()
+      : "DESC";
+
+    const values = [];
+    const whereClauses = [];
+
+    if (user.role !== "admin") {
+      values.push(user.id);
+      whereClauses.push(`created_by = $${values.length}`);
+    }
+
+    if (status) {
+      values.push(status);
+      whereClauses.push(`status = $${values.length}`);
+    }
+
+    if (priority) {
+      values.push(priority);
+      whereClauses.push(`priority = $${values.length}`);
+    }
+
+    if (bank_name) {
+      values.push(bank_name);
+      whereClauses.push(`bank_name = $${values.length}`);
+    }
+
+    const whereQuery = whereClauses.length
+      ? `WHERE ${whereClauses.join(" AND ")}`
+      : "";
+
+    const limitVal = parseInt(limit) || 10;
+    const offsetVal = ((parseInt(page) || 1) - 1) * limitVal;
+
+    values.push(limitVal, offsetVal);
+
+    const query = `
+      SELECT * FROM atm_calls
+      ${whereQuery}
+      ORDER BY ${sortColumn} ${sortOrder}
+      LIMIT $${values.length - 1} OFFSET $${values.length}
+    `;
+
+    const result = await pool.query(query, values);
+
+    return res.json({
+      page: parseInt(page),
+      limit: limitVal,
+      total: result.rowCount,
+      tickets: result.rows,
+    });
+
+  } catch (err) {
+    console.error("getTickets error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message
+    });
   }
-
-  const {
-    status,
-    priority,
-    page = 1,
-    limit = 10,
-    sort = "created_at",
-    order = "desc",
-  } = req.query;
-
-  const values = [];
-  const whereClauses = [];
-
-  if (user.role !== "admin") {
-    values.push(user.id);
-    whereClauses.push(`created_by = $${values.length}`);
-  }
-
-  if (status) {
-    values.push(status);
-    whereClauses.push(`status = $${values.length}`);
-  }
-
-  if (priority) {
-    values.push(priority);
-    whereClauses.push(`priority = $${values.length}`);
-  }
-
-  const whereQuery = whereClauses.length
-    ? `WHERE ${whereClauses.join(" AND ")}`
-    : "";
-
-  const limitVal = Number(limit) || 10;
-  const offsetVal = ((Number(page) || 1) - 1) * limitVal;
-
-  values.push(limitVal, offsetVal);
-
-  const query = `
-    SELECT * FROM atm_calls
-    ${whereQuery}
-    ORDER BY created_at DESC
-    LIMIT $${values.length - 1}
-    OFFSET $${values.length}
-  `;
-
-  const result = await pool.query(query, values);
-
-  return res.json({
-    page: Number(page),
-    limit: limitVal,
-    total: result.rowCount,
-    tickets: result.rows,
-  });
 };
 // ✅ GET TICKET BY ID
 export const getTicketById = async (req, res) => {
