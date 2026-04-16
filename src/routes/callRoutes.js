@@ -21,8 +21,7 @@ const router = express.Router();
 /* ==================== TICKET CRUD ==================== */
 
 /**
- * /**
-@swagger
+ * /**@swagger
 /api/calls:
   post:
     summary: Create ATM call
@@ -60,6 +59,8 @@ const router = express.Router();
     responses:
       201:
         description: Ticket created successfully
+ */
+router.post("/", requireOtpVerified, createCall);
 
 
 /**
