@@ -378,13 +378,15 @@ export const autoAssignTicket = async (req, res, next) => {
     await client.query("BEGIN");
 
     // -----------------------------
-    // Get Ticket (lock row to prevent double assignment)
+    // Get Ticket (lock row)
     // -----------------------------
     const ticketResult = await client.query(
-      `SELECT id, atm_id, location, issue_type, engineer_id, status
-       FROM atm_calls
-       WHERE id = $1
-       FOR UPDATE`,
+      `
+      SELECT id, atm_id, title, description, status, priority, assigned_to
+      FROM atm_calls
+      WHERE id = $1
+      FOR UPDATE
+      `,
       [ticketId]
     );
 
@@ -396,7 +398,7 @@ export const autoAssignTicket = async (req, res, next) => {
 
     const ticket = ticketResult.rows[0];
 
-    if (ticket.engineer_id) {
+    if (ticket.assigned_to) {
       const error = new Error("Ticket already assigned");
       error.status = 400;
       throw error;
@@ -409,7 +411,7 @@ export const autoAssignTicket = async (req, res, next) => {
       SELECT e.id, e.name, e.email, COUNT(c.id) AS workload
       FROM engineers e
       LEFT JOIN atm_calls c
-        ON e.id = c.engineer_id AND c.status != 'closed'
+        ON e.id = c.assigned_to AND c.status != 'closed'
       GROUP BY e.id
       ORDER BY workload ASC
       LIMIT 1
@@ -430,7 +432,7 @@ export const autoAssignTicket = async (req, res, next) => {
     const updateResult = await client.query(
       `
       UPDATE atm_calls
-      SET engineer_id = $1,
+      SET assigned_to = $1,
           status = 'in-progress',
           updated_at = NOW()
       WHERE id = $2
@@ -447,7 +449,7 @@ export const autoAssignTicket = async (req, res, next) => {
     await client.query(
       `
       INSERT INTO ticket_assignment_history
-      (atm_call_id, engineer_id, assigned_at)
+      (atm_call_id, assigned_to, assigned_at)
       VALUES ($1, $2, NOW())
       `,
       [ticketId, engineer.id]
@@ -456,7 +458,7 @@ export const autoAssignTicket = async (req, res, next) => {
     await client.query("COMMIT");
 
     // -----------------------------
-    // Notifications (outside transaction)
+    // Notify Engineer
     // -----------------------------
     try {
       await sendAssignmentEmail({
@@ -468,6 +470,9 @@ export const autoAssignTicket = async (req, res, next) => {
       console.error("Engineer email failed:", err.message);
     }
 
+    // -----------------------------
+    // Notify Admins
+    // -----------------------------
     try {
       const { rows: admins } = await pool.query(
         `SELECT email FROM users WHERE role = 'admin'`
@@ -478,8 +483,8 @@ Ticket Auto Assigned
 
 Ticket ID: ${updatedTicket.id}
 ATM ID: ${updatedTicket.atm_id}
-Location: ${updatedTicket.location}
-Issue: ${updatedTicket.issue_type}
+Title: ${updatedTicket.title}
+Status: ${updatedTicket.status}
 
 Assigned Engineer: ${engineer.name}
       `;
