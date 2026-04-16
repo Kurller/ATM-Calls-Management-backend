@@ -235,110 +235,54 @@ export const deleteTicket = async (req, res) => {
 
 // ✅ ASSIGN TICKET
 export const assignTicket = async (req, res) => {
-  const { ticketId } = req.params;
-  const { engineer_id } = req.body;
-
-  if (!engineer_id) {
-    const error = new Error("engineer_id is required");
-    error.status = 400;
-    throw error;
-  }
-
-  const engineerRes = await pool.query(
-    "SELECT id, name, email FROM engineers WHERE id = $1",
-    [engineer_id]
-  );
-
-  if (!engineerRes.rowCount) {
-    const error = new Error("Engineer does not exist");
-    error.status = 400;
-    throw error;
-  }
-
-  const engineer = engineerRes.rows[0];
-
-  await pool.query("BEGIN");
-
-  let ticket;
-
   try {
-    const ticketRes = await pool.query(
+    const { ticketId } = req.params;
+    const { engineer_id } = req.body;
+
+    if (!engineer_id) {
+      return res.status(400).json({
+        message: "engineer_id is required",
+      });
+    }
+
+    // ✅ check user table instead
+    const engineerRes = await pool.query(
+      "SELECT id, email FROM users WHERE id = $1 AND role = 'engineer'",
+      [engineer_id]
+    );
+
+    if (!engineerRes.rowCount) {
+      return res.status(400).json({
+        message: "Engineer does not exist",
+      });
+    }
+
+    const result = await pool.query(
       `UPDATE atm_calls 
-       SET engineer_id = $1 
+       SET assigned_to = $1 
        WHERE id = $2 
        RETURNING *`,
       [engineer_id, ticketId]
     );
 
-    if (!ticketRes.rowCount) {
-      await pool.query("ROLLBACK");
-      const error = new Error("Ticket not found");
-      error.status = 404;
-      throw error;
+    if (!result.rowCount) {
+      return res.status(404).json({
+        message: "Ticket not found",
+      });
     }
 
-    ticket = ticketRes.rows[0];
-
-    await pool.query(
-      `INSERT INTO ticket_assignment_history 
-       (atm_call_id, engineer_id, assigned_at) 
-       VALUES ($1,$2,NOW())`,
-      [ticketId, engineer_id]
-    );
-
-    await pool.query("COMMIT");
-
-  } catch (err) {
-    await pool.query("ROLLBACK");
-    throw err;
-  }
-
-  // -----------------------------
-  // Notify Engineer
-  // -----------------------------
-  try {
-    await sendAssignmentEmail({
-      engineerName: engineer.name,
-      engineerEmail: engineer.email,
-      ticket,
+    return res.json({
+      message: "Engineer assigned successfully",
+      ticket: result.rows[0],
     });
+
   } catch (err) {
-    console.error("Engineer notification failed:", err.message);
+    console.error("assignTicket error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
   }
-
-  // -----------------------------
-  // Notify Supervisors
-  // -----------------------------
-  try {
-    const { rows: supervisors } = await pool.query(
-      `SELECT email FROM users WHERE role = 'admin'`
-    );
-
-    const message = `
-Ticket Assigned
-
-Ticket ID: ${ticket.id}
-ATM ID: ${ticket.atm_id}
-Location: ${ticket.location}
-Issue: ${ticket.issue_type}
-Assigned Engineer: ${engineer.name}
-    `;
-
-    for (const supervisor of supervisors) {
-      await sendEmail(
-        supervisor.email,
-        "ATM Ticket Assigned",
-        message
-      );
-    }
-  } catch (err) {
-    console.error("Supervisor notification failed:", err.message);
-  }
-
-  res.json({
-    message: "Engineer assigned successfully",
-    ticket,
-  });
 };
 
 // ✅ UPDATE TICKET STATUS
@@ -392,24 +336,38 @@ export const getTicketHistory = async (req, res) => {
 
 // ✅ GET CALLS BY STATUS
 export const getCallsByStatus = async (req, res) => {
-  const { status } = req.query;
-  if (!status) {
-    const error = new Error("Status query parameter is required");
-    error.status = 400;
-    throw error;
+  try {
+    const { status } = req.query;
+
+    if (!status) {
+      return res.status(400).json({
+        message: "Status query parameter is required",
+      });
+    }
+
+    const result = await pool.query(
+      `
+      SELECT 
+        c.*,
+        u.email AS assigned_to_email
+      FROM atm_calls c
+      LEFT JOIN users u ON c.assigned_to = u.id
+      WHERE LOWER(TRIM(c.status)) = LOWER(TRIM($1))
+      ORDER BY c.created_at DESC
+      `,
+      [status]
+    );
+
+    return res.json(result.rows);
+
+  } catch (err) {
+    console.error("getCallsByStatus error:", err);
+    return res.status(500).json({
+      message: "Server error",
+      error: err.message,
+    });
   }
-
-  const result = await pool.query(
-    `SELECT id, atm_id, bank_name, location, issue_type, priority, status, assigned_to_name, created_at, updated_at
-     FROM atm_calls
-     WHERE LOWER(TRIM(status)) = LOWER(TRIM($1))
-     ORDER BY created_at DESC`,
-    [status]
-  );
-
-  res.json(result.rows);
 };
-
 // ✅ AUTO ASSIGN TICKET
 export const autoAssignTicket = async (req, res) => {
   const { ticketId } = req.params;
