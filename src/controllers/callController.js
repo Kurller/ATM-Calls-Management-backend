@@ -34,7 +34,7 @@ export const createCall = async (req, res) => {
       atm_id,
       title,
       description,
-      issue, // fallback from Swagger
+      issue,
       priority,
       assigned_to
     } = req.body;
@@ -45,18 +45,13 @@ export const createCall = async (req, res) => {
       return res.status(401).json({ error: "User not authenticated" });
     }
 
-    // Map Swagger "issue" → description
+    const finalTitle = title || `ATM Issue ${atm_id}`;
     const finalDescription = description || issue;
 
-    if (!atm_id || !title || !finalDescription) {
+    if (!atm_id || !finalDescription) {
       return res.status(400).json({
-        error: "atm_id, title and description are required",
+        error: "atm_id and description are required"
       });
-    }
-
-    let normalizedPriority = priority?.trim().toLowerCase() || "medium";
-    if (!allowedPriorities.includes(normalizedPriority)) {
-      normalizedPriority = "medium";
     }
 
     const result = await pool.query(
@@ -66,24 +61,24 @@ export const createCall = async (req, res) => {
        RETURNING *`,
       [
         atm_id,
-        title,
+        finalTitle,
         finalDescription,
-        normalizedPriority,
+        priority || "medium",
         created_by,
-        assigned_to || null,
+        assigned_to || null
       ]
     );
 
-    const ticket = result.rows[0];
-
-    res.status(201).json({
-      message: "ATM call ticket created successfully",
-      call: ticket,
+    return res.status(201).json({
+      message: "Ticket created successfully",
+      call: result.rows[0]
     });
 
   } catch (err) {
-    console.error("createCall error:", err.message);
-    res.status(500).json({ error: "Server error" });
+    console.error("CREATE CALL ERROR:", err);
+    return res.status(500).json({
+      error: "Internal server error"
+    });
   }
 };
 // ✅ GET ALL TICKETS
