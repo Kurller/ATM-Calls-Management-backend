@@ -85,7 +85,9 @@ export const getTickets = async (req, res) => {
     const user = req.session.user;
 
     if (!user) {
-      return res.status(401).json({ message: "User not authenticated" });
+      return res.status(401).json({
+        message: "User not authenticated",
+      });
     }
 
     const {
@@ -97,10 +99,10 @@ export const getTickets = async (req, res) => {
       order = "desc",
     } = req.query;
 
-    const allowedSortColumns = ["created_at", "priority", "status", "atm_id"];
-    const allowedOrder = ["asc", "desc"];
+    const sortColumn = allowedSortColumns.includes(sort)
+      ? sort
+      : "created_at";
 
-    const sortColumn = allowedSortColumns.includes(sort) ? sort : "created_at";
     const sortOrder = allowedOrder.includes(order.toLowerCase())
       ? order.toUpperCase()
       : "DESC";
@@ -136,7 +138,7 @@ export const getTickets = async (req, res) => {
     const query = `
       SELECT 
         c.*,
-        u.email AS assigned_to_name
+        u.email AS assigned_to_email
       FROM atm_calls c
       LEFT JOIN users u ON c.assigned_to = u.id
       ${whereQuery}
@@ -157,7 +159,7 @@ export const getTickets = async (req, res) => {
   } catch (err) {
     console.error("getTickets error:", err);
     return res.status(500).json({
-      message: "Failed to fetch tickets",
+      message: "Server error",
       error: err.message,
     });
   }
